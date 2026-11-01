@@ -34,6 +34,21 @@ service CatalogueService {
   // powerful than GetItem, so the catalogue serves it only to the workloads it
   // lists as access-info callers (default: the PDP alone).
   rpc GetItemAccessInfo(GetItemAccessInfoRequest) returns (GetItemAccessInfoResponse);
+
+  // GetItemWithAccess is the catalogue's HTTP GET /iudx/v2/cat/item/access
+  // (Java getItemWithAccessChecks) over gRPC: the same service call, so the
+  // same access checks for the SUBJECT — PRIVATE needs ownership;
+  // RESTRICTED/PII need ownership, a delegator who owns the item, or a policy
+  // granted by dx-acl-go /verify — and the same answer.
+  //
+  // dx-dataplane-rs-go calls it per data request, as Java dx-dataplane-rs
+  // calls the HTTP route: it needs the item's NGSI-LD queryTypes and its
+  // organisation for the data-access audit (F58-k/h).
+  //
+  // Errors carry the HTTP route's status as the matching code (NotFound,
+  // PermissionDenied, Unauthenticated, InvalidArgument, Internal) with the
+  // same message.
+  rpc GetItemWithAccess(GetItemWithAccessRequest) returns (GetItemWithAccessResponse);
 }
 
 message GetItemRequest {
@@ -59,6 +74,26 @@ message GetItemAccessInfoResponse {
   bool found = 1;
 
   Item item = 2;
+}
+
+message GetItemWithAccessRequest {
+  // Item id (UUID).
+  string item_id = 1;
+  // is_delegator and did are the HTTP route's isDelegator and did query
+  // parameters (Java GET /item/access): the caller acts for the delegator
+  // did, which must be given, and the delegation between them must allow the
+  // item before did takes part in the access checks.
+  bool is_delegator = 2;
+  string did = 3;
+}
+
+message GetItemWithAccessResponse {
+  // The item document exactly as HTTP /item/access returns it in result[0],
+  // JSON-encoded: the whole catalogue document plus hasOwnerAccess,
+  // hasAdminAccess and, for a RESTRICTED/PII item granted by policy,
+  // policies. It is the whole document on purpose, unlike Item: the HTTP
+  // route returns the whole document, and this RPC must answer the same.
+  bytes item_json = 1;
 }
 
 // Item is the subset of a catalogue document other services consume. It is
