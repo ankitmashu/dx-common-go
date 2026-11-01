@@ -43,6 +43,8 @@
 //	X-Subject-Org-Id      organisation the user belongs to
 //	X-Agent-Subject       acting agent (RFC 8693 act.sub) — delegated calls only
 //	X-Delegation-Id       delegation grant reference — delegated calls only
+//	X-Subject-App-Id      application credential id — app calls only
+//	X-Subject-Scopes      comma-joined scopes of that app — app calls only
 //
 // ROADMAP P0-17 stage 2; ADR-06.
 package headers
@@ -65,6 +67,11 @@ const (
 	// Agent headers are minted only for delegated (agent-acting) requests.
 	HdrAgentSubject = "X-Agent-Subject"
 	HdrDelegationID = "X-Delegation-Id"
+	// App headers are minted only for an application credential (Basic
+	// appId:appSecret): the subject is the app's owner, these name the app and
+	// the scopes its constraints grant (Java AppId principal).
+	HdrSubjectAppID  = "X-Subject-App-Id"
+	HdrSubjectScopes = "X-Subject-Scopes"
 	// HdrAttestation carries the PDP's signed data-access decision (AuthZEN
 	// data_access profile) from the gateway to a data plane, which VERIFIES it
 	// and enforces the obligations it bears. It is minted by the PDP and
@@ -85,6 +92,7 @@ const (
 var All = []string{
 	HdrSubjectID, HdrSubjectEmail, HdrSubjectRoles,
 	HdrSubjectOrgID, HdrAgentSubject, HdrDelegationID,
+	HdrSubjectAppID, HdrSubjectScopes,
 }
 
 // ErrNoSubject indicates the request asserts no subject at all.
@@ -112,6 +120,16 @@ func Project(user auth.DxUser) (http.Header, error) {
 			return nil, errors.New("headers.Project: a role must not contain ','")
 		}
 	}
+	// Scopes travel only with an app credential; same comma rule as roles.
+	var scopes []string
+	if user.AppID != "" {
+		for _, s := range user.Scopes {
+			if strings.Contains(s.Scope, ",") {
+				return nil, errors.New("headers.Project: a scope must not contain ','")
+			}
+			scopes = append(scopes, s.Scope)
+		}
+	}
 
 	h := http.Header{}
 	h.Set(HdrSubjectID, user.ID)
@@ -129,6 +147,12 @@ func Project(user auth.DxUser) (http.Header, error) {
 	}
 	if user.DelegationID != "" {
 		h.Set(HdrDelegationID, user.DelegationID)
+	}
+	if user.AppID != "" {
+		h.Set(HdrSubjectAppID, user.AppID)
+		if joined := joinRoles(scopes); joined != "" {
+			h.Set(HdrSubjectScopes, joined)
+		}
 	}
 	return h, nil
 }
@@ -170,6 +194,8 @@ func Parse(h http.Header) (auth.DxUser, error) {
 		OrganisationID: h.Get(HdrSubjectOrgID),
 		AgentSubject:   h.Get(HdrAgentSubject),
 		DelegationID:   h.Get(HdrDelegationID),
+		AppID:          h.Get(HdrSubjectAppID),
+		Scopes:         scopeEntries(splitRoles(h.Get(HdrSubjectScopes))),
 	}, nil
 }
 
@@ -206,6 +232,17 @@ func splitRoles(joined string) []string {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}
+	}
+	return out
+}
+
+func scopeEntries(names []string) []auth.DelegationScopeEntry {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]auth.DelegationScopeEntry, len(names))
+	for i, n := range names {
+		out[i] = auth.DelegationScopeEntry{Scope: n}
 	}
 	return out
 }

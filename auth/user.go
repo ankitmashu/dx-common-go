@@ -34,6 +34,10 @@ type DxUser struct {
 	// DelegationID references the delegation grant that authorized the
 	// delegated token. Empty on direct user requests.
 	DelegationID string
+	// AppID is set when the caller authenticated with an application
+	// credential (Basic appId:appSecret): ID is then the app's owner and Scopes
+	// the app's scopes (Java AppId principal: sub, app_id, scopes).
+	AppID string
 }
 
 // IsAgent reports whether the request is being made by an agent acting on the

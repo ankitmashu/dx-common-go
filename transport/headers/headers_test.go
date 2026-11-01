@@ -124,6 +124,7 @@ func TestStripRemovesEveryHeader(t *testing.T) {
 	h, err := Project(auth.DxUser{
 		ID: "u-1", Email: "e@x.io", Roles: []string{"r"},
 		OrganisationID: "o", AgentSubject: "a", DelegationID: "d",
+		AppID: "app-1", Scopes: []auth.DelegationScopeEntry{{Scope: "data-access"}},
 	})
 	if err != nil {
 		t.Fatalf("project: %v", err)
@@ -166,5 +167,44 @@ func TestAsserts(t *testing.T) {
 				t.Errorf("Asserts = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// An application credential (Java AppId Basic auth) travels as the owner plus
+// the app id and the app's scopes — what Java's AuthenticationHandler puts in
+// the principal (sub, app_id, scopes) for the dataplane's forScopes check.
+func TestProjectParse_AppRoundTrip(t *testing.T) {
+	user := auth.DxUser{
+		ID: "owner-1", Roles: []string{"consumer"}, AppID: "app-1",
+		Scopes: []auth.DelegationScopeEntry{{Scope: "data-access"}, {Scope: "*"}},
+	}
+	h, err := Project(user)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if h.Get(HdrSubjectAppID) != "app-1" || h.Get(HdrSubjectScopes) != "*,data-access" {
+		t.Fatalf("app headers = %q / %q", h.Get(HdrSubjectAppID), h.Get(HdrSubjectScopes))
+	}
+	got, err := Parse(h)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.AppID != "app-1" || len(got.Scopes) != 2 || got.Scopes[0].Scope != "*" || got.Scopes[1].Scope != "data-access" {
+		t.Fatalf("parsed = %+v", got)
+	}
+}
+
+// Scopes are projected only for an application credential: an agent's or a
+// delegate's token scopes keep their own channels (no behaviour change there).
+func TestProject_ScopesOnlyForApps(t *testing.T) {
+	h, err := Project(auth.DxUser{ID: "u-1", AgentSubject: "a", Scopes: []auth.DelegationScopeEntry{{Scope: "x"}}})
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if h.Get(HdrSubjectScopes) != "" {
+		t.Fatalf("scopes projected for a non-app user: %q", h.Get(HdrSubjectScopes))
+	}
+	if _, err := Project(auth.DxUser{ID: "u-1", AppID: "a", Scopes: []auth.DelegationScopeEntry{{Scope: "a,b"}}}); err == nil {
+		t.Fatal("a scope containing ',' must be refused")
 	}
 }
