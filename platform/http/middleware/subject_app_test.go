@@ -23,3 +23,19 @@ func TestSubjectFromAppCredential(t *testing.T) {
 		}
 	}
 }
+
+// A resolved delegation (F58-r) is a KindUser delegation: the subject is the
+// delegator, the actor the delegatee, with the capped scopes — and the app the
+// delegatee authenticated with, if any. It wins over the app case.
+func TestSubjectFromResolvedDelegation(t *testing.T) {
+	for _, app := range []string{"", "app-9"} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r = r.WithContext(auth.WithUser(r.Context(), auth.DxUser{ID: "delegator-1", Roles: []string{"provider"},
+			DelegateeID: "caller-1", AppID: app, Scopes: []auth.DelegationScopeEntry{{Scope: "data-access"}}}))
+		s, ok := middleware.SubjectFrom(r)
+		if !ok || s.ID != "delegator-1" || s.Delegation == nil || s.Delegation.Kind != identity.KindUser ||
+			s.Delegation.Actor != "caller-1" || s.Delegation.App != app || len(s.Delegation.Scopes) != 1 {
+			t.Fatalf("app %q: subject = %+v (delegation %+v)", app, s, s.Delegation)
+		}
+	}
+}

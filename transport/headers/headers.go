@@ -44,7 +44,10 @@
 //	X-Agent-Subject       acting agent (RFC 8693 act.sub) — delegated calls only
 //	X-Delegation-Id       delegation grant reference — delegated calls only
 //	X-Subject-App-Id      application credential id — app calls only
-//	X-Subject-Scopes      comma-joined scopes of that app — app calls only
+//	X-Subject-Scopes      comma-joined scopes of that app, or of a resolved
+//	                      delegation — app and delegated calls only
+//	X-Subject-Delegatee-Id the authenticated caller when X-Subject-Id is the
+//	                      delegator it named in `did` — delegated calls only
 //
 // ROADMAP P0-17 stage 2; ADR-06.
 package headers
@@ -72,6 +75,11 @@ const (
 	// the scopes its constraints grant (Java AppId principal).
 	HdrSubjectAppID  = "X-Subject-App-Id"
 	HdrSubjectScopes = "X-Subject-Scopes"
+	// HdrSubjectDelegateeID is minted only for a resolved user-to-user
+	// delegation (Java Bearer/Basic + did, F58-r): the subject is the
+	// delegator, this names the caller acting for them (Java delegatee_sub),
+	// and X-Subject-Scopes carries the delegation's capped scopes.
+	HdrSubjectDelegateeID = "X-Subject-Delegatee-Id"
 	// HdrAttestation carries the PDP's signed data-access decision (AuthZEN
 	// data_access profile) from the gateway to a data plane, which VERIFIES it
 	// and enforces the obligations it bears. It is minted by the PDP and
@@ -92,7 +100,7 @@ const (
 var All = []string{
 	HdrSubjectID, HdrSubjectEmail, HdrSubjectRoles,
 	HdrSubjectOrgID, HdrAgentSubject, HdrDelegationID,
-	HdrSubjectAppID, HdrSubjectScopes,
+	HdrSubjectAppID, HdrSubjectScopes, HdrSubjectDelegateeID,
 }
 
 // ErrNoSubject indicates the request asserts no subject at all.
@@ -120,9 +128,10 @@ func Project(user auth.DxUser) (http.Header, error) {
 			return nil, errors.New("headers.Project: a role must not contain ','")
 		}
 	}
-	// Scopes travel only with an app credential; same comma rule as roles.
+	// Scopes travel only with an app credential or a resolved delegation;
+	// same comma rule as roles.
 	var scopes []string
-	if user.AppID != "" {
+	if user.AppID != "" || user.DelegateeID != "" {
 		for _, s := range user.Scopes {
 			if strings.Contains(s.Scope, ",") {
 				return nil, errors.New("headers.Project: a scope must not contain ','")
@@ -150,9 +159,12 @@ func Project(user auth.DxUser) (http.Header, error) {
 	}
 	if user.AppID != "" {
 		h.Set(HdrSubjectAppID, user.AppID)
-		if joined := joinRoles(scopes); joined != "" {
-			h.Set(HdrSubjectScopes, joined)
-		}
+	}
+	if user.DelegateeID != "" {
+		h.Set(HdrSubjectDelegateeID, user.DelegateeID)
+	}
+	if joined := joinRoles(scopes); joined != "" {
+		h.Set(HdrSubjectScopes, joined)
 	}
 	return h, nil
 }
@@ -196,6 +208,7 @@ func Parse(h http.Header) (auth.DxUser, error) {
 		DelegationID:   h.Get(HdrDelegationID),
 		AppID:          h.Get(HdrSubjectAppID),
 		Scopes:         scopeEntries(splitRoles(h.Get(HdrSubjectScopes))),
+		DelegateeID:    h.Get(HdrSubjectDelegateeID),
 	}, nil
 }
 

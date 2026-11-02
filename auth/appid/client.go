@@ -33,6 +33,9 @@ type Client struct {
 	mu    sync.RWMutex
 	cache map[string]verifyEntry         // key: sha256(appID:secret)
 	byApp map[string]map[string]struct{} // appID → its cache keys, for Invalidate
+
+	// delegations caches ResolveDelegation successes (delegation.go, F58-r).
+	delegations *delegationCache
 }
 
 // WorkloadTokens mints a workload credential for a destination
@@ -68,6 +71,8 @@ func NewClient(cfg Config) (*Client, error) {
 		tokens: newTokenSource(cfg),
 		cache:  make(map[string]verifyEntry),
 		byApp:  make(map[string]map[string]struct{}),
+
+		delegations: &delegationCache{now: time.Now},
 	}, nil
 }
 

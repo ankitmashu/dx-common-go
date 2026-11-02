@@ -38,6 +38,13 @@ type DxUser struct {
 	// credential (Basic appId:appSecret): ID is then the app's owner and Scopes
 	// the app's scopes (Java AppId principal: sub, app_id, scopes).
 	AppID string
+	// DelegateeID is set when the request named a delegator in the `did`
+	// header and the gateway resolved that delegation (Java Bearer/Basic +
+	// did → ResolveDelegation, F58-r): ID, Roles, organisation, Email and Name
+	// are then the DELEGATOR's, Scopes the delegation's capped scopes, and
+	// DelegateeID the authenticated caller (Java claim delegatee_sub). AppID
+	// stays set when that caller is an application credential (Basic + did).
+	DelegateeID string
 }
 
 // IsAgent reports whether the request is being made by an agent acting on the

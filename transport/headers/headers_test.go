@@ -125,6 +125,7 @@ func TestStripRemovesEveryHeader(t *testing.T) {
 		ID: "u-1", Email: "e@x.io", Roles: []string{"r"},
 		OrganisationID: "o", AgentSubject: "a", DelegationID: "d",
 		AppID: "app-1", Scopes: []auth.DelegationScopeEntry{{Scope: "data-access"}},
+		DelegateeID: "caller-1",
 	})
 	if err != nil {
 		t.Fatalf("project: %v", err)
@@ -194,8 +195,9 @@ func TestProjectParse_AppRoundTrip(t *testing.T) {
 	}
 }
 
-// Scopes are projected only for an application credential: an agent's or a
-// delegate's token scopes keep their own channels (no behaviour change there).
+// Scopes are projected only for an application credential or a resolved
+// delegation: an agent's token scopes keep their own channel (no behaviour
+// change there).
 func TestProject_ScopesOnlyForApps(t *testing.T) {
 	h, err := Project(auth.DxUser{ID: "u-1", AgentSubject: "a", Scopes: []auth.DelegationScopeEntry{{Scope: "x"}}})
 	if err != nil {
@@ -206,5 +208,34 @@ func TestProject_ScopesOnlyForApps(t *testing.T) {
 	}
 	if _, err := Project(auth.DxUser{ID: "u-1", AppID: "a", Scopes: []auth.DelegationScopeEntry{{Scope: "a,b"}}}); err == nil {
 		t.Fatal("a scope containing ',' must be refused")
+	}
+}
+
+// A resolved delegation (Java Bearer/Basic + did, F58-r) travels as the
+// delegator plus the delegatee and the delegation's capped scopes; an app
+// delegatee keeps its app id.
+func TestProjectParse_DelegationRoundTrip(t *testing.T) {
+	for _, app := range []string{"", "app-9"} {
+		user := auth.DxUser{
+			ID: "delegator-1", Roles: []string{"provider", "consumer"}, OrganisationID: "org-d",
+			DelegateeID: "caller-1", AppID: app,
+			Scopes: []auth.DelegationScopeEntry{{Scope: "data-access"}},
+		}
+		h, err := Project(user)
+		if err != nil {
+			t.Fatalf("project: %v", err)
+		}
+		if h.Get(HdrSubjectDelegateeID) != "caller-1" || h.Get(HdrSubjectScopes) != "data-access" ||
+			h.Get(HdrSubjectAppID) != app {
+			t.Fatalf("app %q: headers = %v", app, h)
+		}
+		got, err := Parse(h)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got.ID != "delegator-1" || got.DelegateeID != "caller-1" || got.AppID != app ||
+			len(got.Scopes) != 1 || got.Scopes[0].Scope != "data-access" {
+			t.Fatalf("parsed = %+v", got)
+		}
 	}
 }
