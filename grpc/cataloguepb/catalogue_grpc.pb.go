@@ -29,6 +29,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	CatalogueService_GetItem_FullMethodName           = "/dx.catalogue.v1.CatalogueService/GetItem"
 	CatalogueService_GetItemAccessInfo_FullMethodName = "/dx.catalogue.v1.CatalogueService/GetItemAccessInfo"
+	CatalogueService_GetItemWithAccess_FullMethodName = "/dx.catalogue.v1.CatalogueService/GetItemWithAccess"
 )
 
 // CatalogueServiceClient is the client API for CatalogueService service.
@@ -57,6 +58,20 @@ type CatalogueServiceClient interface {
 	// powerful than GetItem, so the catalogue serves it only to the workloads it
 	// lists as access-info callers (default: the PDP alone).
 	GetItemAccessInfo(ctx context.Context, in *GetItemAccessInfoRequest, opts ...grpc.CallOption) (*GetItemAccessInfoResponse, error)
+	// GetItemWithAccess is the catalogue's HTTP GET /iudx/v2/cat/item/access
+	// (Java getItemWithAccessChecks) over gRPC: the same service call, so the
+	// same access checks for the SUBJECT — PRIVATE needs ownership;
+	// RESTRICTED/PII need ownership, a delegator who owns the item, or a policy
+	// granted by dx-acl-go /verify — and the same answer.
+	//
+	// dx-dataplane-rs-go calls it per data request, as Java dx-dataplane-rs
+	// calls the HTTP route: it needs the item's NGSI-LD queryTypes and its
+	// organisation for the data-access audit (F58-k/h).
+	//
+	// Errors carry the HTTP route's status as the matching code (NotFound,
+	// PermissionDenied, Unauthenticated, InvalidArgument, Internal) with the
+	// same message.
+	GetItemWithAccess(ctx context.Context, in *GetItemWithAccessRequest, opts ...grpc.CallOption) (*GetItemWithAccessResponse, error)
 }
 
 type catalogueServiceClient struct {
@@ -81,6 +96,16 @@ func (c *catalogueServiceClient) GetItemAccessInfo(ctx context.Context, in *GetI
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetItemAccessInfoResponse)
 	err := c.cc.Invoke(ctx, CatalogueService_GetItemAccessInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *catalogueServiceClient) GetItemWithAccess(ctx context.Context, in *GetItemWithAccessRequest, opts ...grpc.CallOption) (*GetItemWithAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetItemWithAccessResponse)
+	err := c.cc.Invoke(ctx, CatalogueService_GetItemWithAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +138,20 @@ type CatalogueServiceServer interface {
 	// powerful than GetItem, so the catalogue serves it only to the workloads it
 	// lists as access-info callers (default: the PDP alone).
 	GetItemAccessInfo(context.Context, *GetItemAccessInfoRequest) (*GetItemAccessInfoResponse, error)
+	// GetItemWithAccess is the catalogue's HTTP GET /iudx/v2/cat/item/access
+	// (Java getItemWithAccessChecks) over gRPC: the same service call, so the
+	// same access checks for the SUBJECT — PRIVATE needs ownership;
+	// RESTRICTED/PII need ownership, a delegator who owns the item, or a policy
+	// granted by dx-acl-go /verify — and the same answer.
+	//
+	// dx-dataplane-rs-go calls it per data request, as Java dx-dataplane-rs
+	// calls the HTTP route: it needs the item's NGSI-LD queryTypes and its
+	// organisation for the data-access audit (F58-k/h).
+	//
+	// Errors carry the HTTP route's status as the matching code (NotFound,
+	// PermissionDenied, Unauthenticated, InvalidArgument, Internal) with the
+	// same message.
+	GetItemWithAccess(context.Context, *GetItemWithAccessRequest) (*GetItemWithAccessResponse, error)
 	mustEmbedUnimplementedCatalogueServiceServer()
 }
 
@@ -128,6 +167,9 @@ func (UnimplementedCatalogueServiceServer) GetItem(context.Context, *GetItemRequ
 }
 func (UnimplementedCatalogueServiceServer) GetItemAccessInfo(context.Context, *GetItemAccessInfoRequest) (*GetItemAccessInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetItemAccessInfo not implemented")
+}
+func (UnimplementedCatalogueServiceServer) GetItemWithAccess(context.Context, *GetItemWithAccessRequest) (*GetItemWithAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetItemWithAccess not implemented")
 }
 func (UnimplementedCatalogueServiceServer) mustEmbedUnimplementedCatalogueServiceServer() {}
 func (UnimplementedCatalogueServiceServer) testEmbeddedByValue()                          {}
@@ -186,6 +228,24 @@ func _CatalogueService_GetItemAccessInfo_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CatalogueService_GetItemWithAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetItemWithAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CatalogueServiceServer).GetItemWithAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CatalogueService_GetItemWithAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CatalogueServiceServer).GetItemWithAccess(ctx, req.(*GetItemWithAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CatalogueService_ServiceDesc is the grpc.ServiceDesc for CatalogueService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +260,10 @@ var CatalogueService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetItemAccessInfo",
 			Handler:    _CatalogueService_GetItemAccessInfo_Handler,
+		},
+		{
+			MethodName: "GetItemWithAccess",
+			Handler:    _CatalogueService_GetItemWithAccess_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

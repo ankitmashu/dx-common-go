@@ -72,6 +72,12 @@ type Delegation struct {
 	// conveys NO authority, which is a valid and deliberately restrictive state
 	// — never treat it as "unrestricted".
 	Scopes []Scope
+
+	// App is the application credential the Actor authenticated with, for a
+	// KindUser delegation reached through Basic appId:appSecret + did (Java:
+	// the delegatee is the app's owner and the app id stays on the request).
+	// Empty otherwise.
+	App string
 }
 
 // Kind enumerates how authority was delegated.

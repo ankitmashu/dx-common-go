@@ -170,6 +170,23 @@ func SubjectFrom(r *http.Request) (identity.Subject, bool) {
 	// for a principal", distinguished by Kind so a policy can treat an
 	// autonomous agent differently from a colleague acting on your behalf.
 	switch {
+	case u.DelegateeID != "":
+		// A resolved user-to-user delegation (Java Bearer/Basic + did,
+		// F58-r): the subject is the delegator, the delegatee is acting for
+		// them with the delegation's capped scopes — through an app when it
+		// authenticated with one.
+		sub.Delegation = &identity.Delegation{
+			Actor: u.DelegateeID, GrantID: u.DelegationID,
+			Kind: identity.KindUser, Scopes: scopesOf(u), App: u.AppID,
+		}
+	case u.AppID != "":
+		// An application credential (Basic appId:appSecret): the subject is
+		// the app's owner, acting through the app with exactly its scopes —
+		// none is a valid, refusing state, so it is a delegation even then.
+		sub.Delegation = &identity.Delegation{
+			Actor: u.AppID, GrantID: u.DelegationID,
+			Kind: identity.KindApp, Scopes: scopesOf(u),
+		}
 	case u.AgentSubject != "":
 		sub.Delegation = &identity.Delegation{
 			Actor: u.AgentSubject, GrantID: u.DelegationID,
