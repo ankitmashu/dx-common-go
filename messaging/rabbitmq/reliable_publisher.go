@@ -77,9 +77,74 @@ func NewReliablePublisher(cfg PublisherConfig) (*ReliablePublisher, error) {
 	return p, nil
 }
 
+// ErrExchangeNotFound is CheckExchange's answer for a missing exchange.
+var ErrExchangeNotFound = errors.New("rabbitmq: exchange not found")
+
+// ErrNotConnected is CheckExchange's answer while the publisher has no
+// connection (e.g. the broker was unreachable at startup).
+var ErrNotConnected = errors.New("rabbitmq publisher: not connected")
+
+// checkTimeout bounds CheckExchange when ctx has no deadline.
+const checkTimeout = 10 * time.Second
+
+// CheckExchange reports whether exchange exists, without creating or changing
+// anything: a passive declare, which the broker answers "exists" or 404. A
+// service whose broker user may only publish uses it at startup to fail fast
+// on a missing or misspelt exchange — a publish to one is otherwise only
+// noticed when the first message is lost.
+//
+// It runs on a short-lived channel of its own, because a failed passive
+// declare closes the channel it ran on and the publishing channel must not be
+// touched. Returns ErrExchangeNotFound for a missing exchange, ErrNotConnected
+// without a connection, nil for the default exchange ("").
+func (p *ReliablePublisher) CheckExchange(ctx context.Context, exchange string) error {
+	if exchange == "" {
+		return nil
+	}
+	p.mu.Lock()
+	conn := p.conn
+	p.mu.Unlock()
+	if conn == nil || conn.IsClosed() {
+		return ErrNotConnected
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, checkTimeout)
+		defer cancel()
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("rabbitmq: open channel to check exchange %q: %w", exchange, err)
+	}
+	defer func() { _ = ch.Close() }()
+
+	done := make(chan error, 1)
+	go func() {
+		// The kind is ignored by a passive declare; only the name is checked.
+		done <- ch.ExchangeDeclarePassive(exchange, "topic", true, false, false, false, nil)
+	}()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		return fmt.Errorf("rabbitmq: check exchange %q: %w", exchange, ctx.Err())
+	}
+	if err == nil {
+		return nil
+	}
+	var ae *amqp.Error
+	if errors.As(err, &ae) && ae.Code == amqp.NotFound {
+		return fmt.Errorf("%w: %q", ErrExchangeNotFound, exchange)
+	}
+	return fmt.Errorf("rabbitmq: check exchange %q: %w", exchange, err)
+}
+
 // PublishOptions carries optional per-message metadata.
 type PublishOptions struct {
 	MessageID string
+	// Type is the AMQP message type property, e.g. a notification's emailType.
+	// It lets broker tooling show what a message is without decoding the body.
+	Type string
 	// Headers are merged onto the message's application headers, after trace
 	// context is injected. A key that collides with a trace header loses —
 	// corrupting trace propagation to carry an application value would be a
@@ -122,6 +187,7 @@ func (p *ReliablePublisher) Publish(ctx context.Context, exchange, routingKey st
 		DeliveryMode: amqp.Persistent,
 		Timestamp:    time.Now().UTC(),
 		MessageId:    opts.MessageID,
+		Type:         opts.Type,
 		Headers:      headers,
 		Body:         body,
 	}
